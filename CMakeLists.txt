@@ -50,10 +50,33 @@ qt_standard_project_setup()
 
 # Find Microsoft Detours (via vcpkg)
 find_path(DETOURS_INCLUDE_DIRS "detours/detours.h")
-find_library(DETOURS_LIBRARY detours REQUIRED)
+get_filename_component(DETOURS_INSTALLED_DIR "${DETOURS_INCLUDE_DIRS}" DIRECTORY)
+find_library(
+    DETOURS_LIBRARY_RELEASE
+    NAMES detours
+    PATHS "${DETOURS_INSTALLED_DIR}/lib"
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+find_library(
+    DETOURS_LIBRARY_DEBUG
+    NAMES detours
+    PATHS "${DETOURS_INSTALLED_DIR}/debug/lib"
+    NO_DEFAULT_PATH
+)
+
+set(DETOURS_LIBRARIES optimized ${DETOURS_LIBRARY_RELEASE})
+if(DETOURS_LIBRARY_DEBUG)
+    list(APPEND DETOURS_LIBRARIES debug ${DETOURS_LIBRARY_DEBUG})
+elseif((CMAKE_CONFIGURATION_TYPES AND "Debug" IN_LIST CMAKE_CONFIGURATION_TYPES) OR (NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE STREQUAL "Debug"))
+    message(WARNING "Debug Detours library not found; Debug builds will link against the Release Detours library")
+else()
+    message(STATUS "Debug Detours library not found; using Release Detours library for non-Debug configurations")
+endif()
 
 message(STATUS "Detours include: ${DETOURS_INCLUDE_DIRS}")
-message(STATUS "Detours library: ${DETOURS_LIBRARY}")
+message(STATUS "Detours release library: ${DETOURS_LIBRARY_RELEASE}")
+message(STATUS "Detours debug library: ${DETOURS_LIBRARY_DEBUG}")
 
 # Export architecture suffix for subprojects
 set(ARCH_SUFFIX ${ARCH_SUFFIX} CACHE STRING "Architecture suffix" FORCE)
@@ -70,4 +93,3 @@ add_subdirectory(cli)
 
 # Ensure hookdll is built before launcher
 add_dependencies(MiniProxifier MiniProxifierHook)
-

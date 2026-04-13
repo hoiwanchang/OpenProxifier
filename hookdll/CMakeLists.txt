@@ -15,7 +15,7 @@ add_library(MiniProxifierHook SHARED
 # Link dependencies
 target_link_libraries(MiniProxifierHook PRIVATE
     MiniProxifierCommon
-    ${DETOURS_LIBRARY}
+    ${DETOURS_LIBRARIES}
     ws2_32
     kernel32
 )
