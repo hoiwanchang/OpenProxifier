@@ -40,12 +40,13 @@ jobs:
       - name: Download WinDivert
         shell: pwsh
         run: |
-          $ver = "${{ env.WINDIVERT_VERSION }}"
-          $url = "https://github.com/basil00/WinDivert/releases/download/v${ver}/WinDivert-${ver}.zip"
+          $archiveVer = "${{ env.WINDIVERT_VERSION }}"
+          $tagVer = $archiveVer -replace '-.*$',''
+          $url = "https://github.com/basil00/WinDivert/releases/download/v${tagVer}/WinDivert-${archiveVer}.zip"
           Write-Host "Downloading WinDivert from: $url"
           Invoke-WebRequest -Uri $url -OutFile WinDivert.zip
           Expand-Archive -Path WinDivert.zip -DestinationPath .
-          Rename-Item -Path "WinDivert-${ver}" -NewName "windivert"
+          Rename-Item -Path "WinDivert-${archiveVer}" -NewName "windivert"
           Write-Host "WinDivert extracted to windivert/"
 
       - name: Configure CMake
