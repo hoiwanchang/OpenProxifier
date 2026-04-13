@@ -2,6 +2,7 @@
   "name": "miniproxifier",
   "version": "1.0.0",
   "description": "Windows per-process transparent SOCKS5 proxy injector",
+  "builtin-baseline": "c3867e714dd3a51c272826eea77267876517ed99",
   "dependencies": [
     "detours"
   ]
