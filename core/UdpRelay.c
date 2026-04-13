@@ -1,3 +1,7 @@
+// Increase FD_SETSIZE before any winsock include to avoid fd_set overflow
+// with up to MAX_UDP_SESSIONS (256) relay sockets + 1 listen socket
+#define FD_SETSIZE 512
+
 #include "UdpRelay.h"
 #include "Socks5.h"
 #include "ProxyEngine.h"
@@ -11,6 +15,7 @@
 
 #define MAX_UDP_SESSIONS 256
 #define UDP_BUFFER_SIZE 65535
+#define UDP_SESSION_TIMEOUT 120000  // 120 seconds inactivity timeout
 
 // External references
 extern char g_proxy_host[256];
@@ -189,6 +194,27 @@ static UdpSession* find_free_session(void) {
     return NULL;
 }
 
+// Clean up expired UDP sessions (must be called with g_lock held)
+static void cleanup_expired_sessions(void) {
+    DWORD now = GetTickCount();
+    for (int i = 0; i < MAX_UDP_SESSIONS; i++) {
+        if (g_sessions[i].active &&
+            (now - g_sessions[i].last_activity) >= UDP_SESSION_TIMEOUT) {
+            log_message("[UdpRelay] Session %d expired (client port %d)",
+                i, g_sessions[i].client_port);
+            if (g_sessions[i].proxy_tcp_socket != INVALID_SOCKET) {
+                closesocket(g_sessions[i].proxy_tcp_socket);
+                g_sessions[i].proxy_tcp_socket = INVALID_SOCKET;
+            }
+            if (g_sessions[i].relay_udp_socket != INVALID_SOCKET) {
+                closesocket(g_sessions[i].relay_udp_socket);
+                g_sessions[i].relay_udp_socket = INVALID_SOCKET;
+            }
+            g_sessions[i].active = false;
+        }
+    }
+}
+
 static DWORD WINAPI UdpRelayThread(LPVOID arg) {
     uint8_t buffer[UDP_BUFFER_SIZE];
     struct sockaddr_in from_addr;
@@ -201,8 +227,9 @@ static DWORD WINAPI UdpRelayThread(LPVOID arg) {
         FD_ZERO(&read_fds);
         FD_SET(g_listen_socket, &read_fds);
 
-        // Also add all session relay sockets
+        // Also add all session relay sockets and clean up expired sessions
         EnterCriticalSection(&g_lock);
+        cleanup_expired_sessions();
         for (int i = 0; i < MAX_UDP_SESSIONS; i++) {
             if (g_sessions[i].active && g_sessions[i].relay_udp_socket != INVALID_SOCKET) {
                 FD_SET(g_sessions[i].relay_udp_socket, &read_fds);

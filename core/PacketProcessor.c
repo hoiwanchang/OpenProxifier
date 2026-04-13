@@ -22,6 +22,7 @@
 #define CONNECTION_CACHE_TTL 30000  // 30 seconds TTL for connections
 #define DECISION_CACHE_SIZE 1024
 #define DECISION_CACHE_TTL 60000  // 60 seconds TTL for decisions
+#define PACKET_PROCESSOR_THREADS 4
 
 // Decision cache values
 #define DECISION_UNKNOWN 0
@@ -66,7 +67,7 @@ static CRITICAL_SECTION g_cache_lock;
 static bool g_cache_initialized = false;
 
 static HANDLE g_windivert_handle = INVALID_HANDLE_VALUE;
-static HANDLE g_packet_thread = NULL;
+static HANDLE g_packet_threads[PACKET_PROCESSOR_THREADS];
 static volatile bool g_running = false;
 static DWORD g_current_process_id = 0;
 static uint16_t g_active_tcp_port = LOCAL_TCP_PORT_BASE;
@@ -688,14 +689,23 @@ void PacketProcessor_Cleanup(void) {
 bool PacketProcessor_Start(void) {
     if (g_running) return true;
 
-    char filter[512];
+    char filter[1024];
     // Capture TCP/UDP packets using active ports:
-    // - Outbound TCP: all except to local proxy port (for redirection)
-    // - Outbound UDP: all except to local relay port
+    // - Outbound TCP/UDP to non-private destinations (for redirection)
     // - Outbound TCP from local proxy: for NAT response (LocalProxy -> client)
+    // Exclude private/LAN/multicast/broadcast to reduce unnecessary processing
     snprintf(filter, sizeof(filter),
-        "(outbound and tcp and tcp.DstPort != %d and tcp.SrcPort != %d) or "
-        "(outbound and udp and udp.DstPort != %d) or "
+        "(outbound and "
+        "not (ip.DstAddr >= 10.0.0.0 and ip.DstAddr <= 10.255.255.255) and "
+        "not (ip.DstAddr >= 172.16.0.0 and ip.DstAddr <= 172.31.255.255) and "
+        "not (ip.DstAddr >= 192.168.0.0 and ip.DstAddr <= 192.168.255.255) and "
+        "not (ip.DstAddr >= 127.0.0.0 and ip.DstAddr <= 127.255.255.255) and "
+        "not (ip.DstAddr >= 169.254.0.0 and ip.DstAddr <= 169.254.255.255) and "
+        "not (ip.DstAddr >= 224.0.0.0 and ip.DstAddr <= 239.255.255.255) and "
+        "ip.DstAddr != 255.255.255.255 and "
+        "((tcp and tcp.DstPort != %d and tcp.SrcPort != %d) or "
+        "(udp and udp.DstPort != %d))"
+        ") or "
         "(outbound and tcp and tcp.SrcPort == %d)",
         g_active_tcp_port, g_active_tcp_port, g_active_udp_port, g_active_tcp_port);
 
@@ -712,12 +722,21 @@ bool PacketProcessor_Start(void) {
     WinDivertSetParam(g_windivert_handle, WINDIVERT_PARAM_QUEUE_TIME, 2000);
 
     g_running = true;
-    g_packet_thread = CreateThread(NULL, 0, PacketProcessorThread, NULL, 0, NULL);
-    if (g_packet_thread == NULL) {
-        WinDivertClose(g_windivert_handle);
-        g_windivert_handle = INVALID_HANDLE_VALUE;
-        g_running = false;
-        return false;
+    memset(g_packet_threads, 0, sizeof(g_packet_threads));
+    for (int i = 0; i < PACKET_PROCESSOR_THREADS; i++) {
+        g_packet_threads[i] = CreateThread(NULL, 0, PacketProcessorThread, NULL, 0, NULL);
+        if (g_packet_threads[i] == NULL) {
+            log_message("[PacketProcessor] Failed to create worker thread %d", i);
+            g_running = false;
+            for (int j = 0; j < i; j++) {
+                WaitForSingleObject(g_packet_threads[j], 5000);
+                CloseHandle(g_packet_threads[j]);
+                g_packet_threads[j] = NULL;
+            }
+            WinDivertClose(g_windivert_handle);
+            g_windivert_handle = INVALID_HANDLE_VALUE;
+            return false;
+        }
     }
 
     log_message("[PacketProcessor] Started successfully");
@@ -734,10 +753,12 @@ void PacketProcessor_Stop(void) {
         g_windivert_handle = INVALID_HANDLE_VALUE;
     }
 
-    if (g_packet_thread != NULL) {
-        WaitForSingleObject(g_packet_thread, 5000);
-        CloseHandle(g_packet_thread);
-        g_packet_thread = NULL;
+    for (int i = 0; i < PACKET_PROCESSOR_THREADS; i++) {
+        if (g_packet_threads[i] != NULL) {
+            WaitForSingleObject(g_packet_threads[i], 5000);
+            CloseHandle(g_packet_threads[i]);
+            g_packet_threads[i] = NULL;
+        }
     }
 
     log_message("[PacketProcessor] Stopped");
