@@ -1,0 +1,97 @@
+name: Build & Pre-Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  WINDIVERT_VERSION: "2.2.2-A"
+  QT_VERSION: "6.8.0"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+
+      - name: Resolve Qt prefix path
+        id: qt
+        shell: pwsh
+        run: |
+          $qtPrefix = (Resolve-Path "$env:Qt6_DIR/../../..").Path
+          echo "prefix=$qtPrefix" >> $env:GITHUB_OUTPUT
+          Write-Host "Qt prefix path: $qtPrefix"
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+
+      - name: Download WinDivert
+        shell: pwsh
+        run: |
+          $ver = "${{ env.WINDIVERT_VERSION }}"
+          $url = "https://github.com/basil00/WinDivert/releases/download/v${ver}/WinDivert-${ver}.zip"
+          Write-Host "Downloading WinDivert from: $url"
+          Invoke-WebRequest -Uri $url -OutFile WinDivert.zip
+          Expand-Archive -Path WinDivert.zip -DestinationPath .
+          Rename-Item -Path "WinDivert-${ver}" -NewName "windivert"
+          Write-Host "WinDivert extracted to windivert/"
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -A x64
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.prefix }}"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $src = "build/bin/Release"
+          $dest = "OpenProxifier-x64"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Copy-Item -Path $src -Destination $dest -Recurse
+          Compress-Archive -Path $dest -DestinationPath "OpenProxifier-x64.zip"
+          Write-Host "Packaged to OpenProxifier-x64.zip"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenProxifier-x64
+          path: OpenProxifier-x64/
+
+      - name: Generate tag name
+        id: tag
+        shell: bash
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TAG="dev-$(date -u +'%Y%m%d-%H%M%S')-${SHORT_SHA}"
+          echo "name=${TAG}" >> $GITHUB_OUTPUT
+          echo "Generated tag: ${TAG}"
+
+      - name: Create Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: "Dev Build ${{ steps.tag.outputs.name }}"
+          body: |
+            Automated pre-release build from commit ${{ github.sha }}.
+
+            **Commit:** [`${{ github.sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+            **Branch:** `${{ github.ref_name }}`
+          prerelease: true
+          files: OpenProxifier-x64.zip
