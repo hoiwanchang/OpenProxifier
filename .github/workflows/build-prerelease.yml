@@ -30,7 +30,7 @@ jobs:
         id: qt
         shell: pwsh
         run: |
-          $qtPrefix = (Resolve-Path "$env:Qt6_DIR/../../..").Path
+          $qtPrefix = [System.IO.Path]::GetFullPath("$env:Qt6_DIR/../../..")
           echo "prefix=$qtPrefix" >> $env:GITHUB_OUTPUT
           Write-Host "Qt prefix path: $qtPrefix"
 
