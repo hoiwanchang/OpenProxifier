@@ -26,6 +26,7 @@ typedef struct {
     SOCKET client_socket;
     uint32_t dest_ip;
     uint16_t dest_port;
+    uint16_t client_port;
 } ConnectionContext;
 
 typedef struct {
@@ -80,6 +81,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
     SOCKET client_sock = ctx->client_socket;
     uint32_t dest_ip = ctx->dest_ip;
     uint16_t dest_port = ctx->dest_port;
+    uint16_t client_port = ctx->client_port;
 
     free(ctx);
 
@@ -88,6 +90,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
     if (proxy_ip == 0) {
         log_message("[LocalProxy] Failed to resolve proxy host: %s", g_proxy_host);
         closesocket(client_sock);
+        ConnectionTracker_Remove(client_port);
         return 0;
     }
 
@@ -96,6 +99,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
     if (proxy_sock == INVALID_SOCKET) {
         log_message("[LocalProxy] Failed to create proxy socket");
         closesocket(client_sock);
+        ConnectionTracker_Remove(client_port);
         return 0;
     }
 
@@ -108,6 +112,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
         log_message("[LocalProxy] Failed to connect to proxy %s:%d", g_proxy_host, g_proxy_port);
         closesocket(client_sock);
         closesocket(proxy_sock);
+        ConnectionTracker_Remove(client_port);
         return 0;
     }
 
@@ -127,6 +132,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
             (dest_ip >> 16) & 0xFF, (dest_ip >> 24) & 0xFF, dest_port);
         closesocket(client_sock);
         closesocket(proxy_sock);
+        ConnectionTracker_Remove(client_port);
         return 0;
     }
 
@@ -139,6 +145,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
         if (ctx2) free(ctx2);
         closesocket(client_sock);
         closesocket(proxy_sock);
+        ConnectionTracker_Remove(client_port);
         return 0;
     }
 
@@ -153,6 +160,7 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
         free(ctx2);
         closesocket(client_sock);
         closesocket(proxy_sock);
+        ConnectionTracker_Remove(client_port);
         return 0;
     }
 
@@ -164,6 +172,8 @@ static DWORD WINAPI ConnectionHandler(LPVOID arg) {
 
     closesocket(client_sock);
     closesocket(proxy_sock);
+
+    ConnectionTracker_Remove(client_port);
 
     return 0;
 }
@@ -210,6 +220,7 @@ static DWORD WINAPI LocalProxyThread(LPVOID arg) {
         ctx->client_socket = client_sock;
         ctx->dest_ip = dest_ip;
         ctx->dest_port = dest_port;
+        ctx->client_port = client_port;
 
         // Handle in new thread
         HANDLE conn_thread = CreateThread(NULL, 0, ConnectionHandler, ctx, 0, NULL);
