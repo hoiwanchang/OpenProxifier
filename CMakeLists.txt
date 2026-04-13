@@ -68,7 +68,7 @@ find_library(
 set(DETOURS_LIBRARIES optimized ${DETOURS_LIBRARY_RELEASE})
 if(DETOURS_LIBRARY_DEBUG)
     list(APPEND DETOURS_LIBRARIES debug ${DETOURS_LIBRARY_DEBUG})
-elseif((CMAKE_CONFIGURATION_TYPES AND "Debug" IN_LIST CMAKE_CONFIGURATION_TYPES) OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+elseif((CMAKE_CONFIGURATION_TYPES AND "Debug" IN_LIST CMAKE_CONFIGURATION_TYPES) OR (NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE STREQUAL "Debug"))
     message(WARNING "Debug Detours library not found; Debug builds will link against the Release Detours library")
 else()
     message(STATUS "Debug Detours library not found; using Release Detours library for non-Debug configurations")
